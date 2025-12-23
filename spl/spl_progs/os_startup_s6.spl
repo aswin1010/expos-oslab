@@ -1,0 +1,30 @@
+//INIT
+loadi(65,7);
+loadi(66,8);
+
+//INT 10 MODULE
+loadi(22,35);
+loadi(23,36);
+
+//EXCEPTION HANDLER
+loadi(2,15);
+loadi(3,16);
+
+PTBR = PAGE_TABLE_BASE;
+PTLR = 3;
+
+
+//SETTING PAGE TABLE FOR INIT
+[PTBR + 0] = 65;
+[PTBR + 1] = "0100";
+[PTBR + 2] = 66;
+[PTBR + 3] = "0100";
+[PTBR + 4] = 76;
+[PTBR + 5] = "0110";
+
+//SETTING STACK TOP FOR INIT
+[76*512] = 0;
+SP = 2*512;
+
+ireturn;
+
