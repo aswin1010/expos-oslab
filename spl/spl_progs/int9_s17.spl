@@ -1,0 +1,156 @@
+//SAVING USER STACK
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13] = SP;
+
+alias userSP R0;
+userSP = SP;
+
+//SWITCHING STACKS
+SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE +  1] + 11]*512 -1;
+
+//SETTING MOD FLAG TO SYSTEM CALL NUMBER
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 9;
+
+alias physicalPageNum R1;
+alias offset R2;
+alias physicalAddr R3;
+
+physicalPageNum = [PTBR + 2*((userSP-4)/512)];
+offset = (userSP-4)%512;
+physicalAddr = physicalPageNum*512 + offset;
+
+alias fileName R4;
+fileName = [physicalAddr];
+
+alias inodeEntry R5;
+alias isPresent R6;
+
+isPresent = 0;
+inodeEntry = 0;
+
+while(inodeEntry < MAX_FILE_NUM) do
+	if([INODE_TABLE + 16*inodeEntry + 1] == fileName) then
+		if([INODE_TABLE + 16*inodeEntry] == EXEC) then
+			isPresent = 1;
+			break;
+		endif;
+	endif;
+	inodeEntry = inodeEntry + 1;
+endwhile;
+
+
+if(isPresent == 0) then
+	physicalPageNum = [PTBR + 2*((userSP-1)/512)];
+	offset = (userSP-1)%512;
+	physicalAddr = physicalPageNum*512 + offset;
+	[physicalAddr] = -1;
+	[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+    	SP = userSP;
+    	ireturn;
+endif;
+
+//EXITING CURRENT PROCESS
+multipush(R0,R1,R2,R3,R4,R5,R6);
+
+R1 = 3;
+R2 = [SYSTEM_STATUS_TABLE + 1];
+
+call MOD_1;
+
+multipop(R0,R1,R2,R3,R4,R5,R6);
+
+
+//RECLAIMING THE USERPAGE
+alias userAreaPageNum R7;
+userAreaPageNum = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 11];
+
+[MEMORY_FREE_LIST + userAreaPageNum] = [MEMORY_FREE_LIST + userAreaPageNum] + 1;
+
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+
+SP = userAreaPageNum*512 - 1;
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 4] = RUNNING;
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 7] = inodeEntry;
+
+
+
+//SETTING PAGE TABLE ENTRIES
+
+//LIBRARY
+[PTBR + 0] = 63;
+[PTBR + 1] = "0100";
+[PTBR + 2] = 64;
+[PTBR + 3] = "0100";
+
+
+multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+
+//HEAP
+//GETTIING FREE PAGE FROM MEM MODULE
+R1 = 1;
+call MOD_2;
+[PTBR + 4] = R0;
+[PTBR + 5] = "0110";
+
+R1 = 1;
+call MOD_2;
+[PTBR + 6] = R0;
+[PTBR + 7] = "0110";
+
+//STACK
+
+R1 = 1;
+call MOD_2;
+[PTBR + 16] = R0;
+[PTBR + 17] = "0110";
+
+R1 = 1;
+call MOD_2;
+[PTBR + 18] = R0;
+[PTBR + 19] = "0110";
+
+
+multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+
+//CODE
+
+alias  numBlocks R8;
+alias i R9;
+
+numBlocks = (([INODE_TABLE + 16*inodeEntry + 2]-1)/512) + 1;
+i=0;
+
+multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+while(i < 4) do
+	if(i < numBlocks) then
+		R1 = 1;
+		call MOD_2;
+		[PTBR + 8 + 2*i] = R0;
+		[PTBR + 9 + 2*i] = "0100";
+	else
+		[PTBR + 8 + 2*i] = -1;
+                [PTBR + 9 + 2*i] = "0000";
+	endif;
+	i = i + 1;
+endwhile;
+
+multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+i = 0;
+while(i < numBlocks) do
+	loadi([PTBR + 8 + 2*i],[INODE_TABLE + inodeEntry*16 + 8 + i]);
+	i = i + 1;
+endwhile;
+
+
+
+//SETTING STACK TOP
+[[PTBR+16] * 512] = [[PTBR + 8]*512 + 1];
+
+SP = 8*512;
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+
+ireturn;
+
