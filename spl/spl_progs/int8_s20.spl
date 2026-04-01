@@ -111,7 +111,14 @@ else
 		i = i + 2;
 	endwhile;
 	
-	
+	// disk map table for child
+    	i = 0;
+    	while (i < 10) do
+        	[DISK_MAP_TABLE + 10 * newPID + i] = [DISK_MAP_TABLE + [SYSTEM_STATUS_TABLE + 1] * 10 + i];
+        	i = i + 1;
+    	endwhile;	
+
+	//stack copy
 	alias oldStack R5;
    	alias newStack R6;
 
