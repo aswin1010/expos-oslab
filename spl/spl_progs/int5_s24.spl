@@ -1,0 +1,88 @@
+alias userSP R0;
+userSP = SP;
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 13] = SP;
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 11]*512 -1;
+
+alias sysCallNum R1;
+sysCallNum = [[PTBR + 2*((userSP-5)/512)]*512 + ((userSP-5)%512)];
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 9]  = sysCallNum;
+
+alias returnAddress R2;
+returnAddress = [PTBR + 2*((userSP-1)/512)]*512 + ((userSP-1)%512);
+
+//Open sysCall
+if(sysCallNum == 2) then
+	alias i R3;
+	i = 0;
+	alias resourceTable R4;
+	resourceTable = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 11]*512 + RESOURCE_TABLE_OFFSET;
+	while(i < 8) do
+		if([resourceTable + i*2 + 0] == -1) then
+			break;
+		endif;
+		i = i + 1;
+	endwhile;
+
+
+	if(i == 8) then
+		[returnAddress] = -3;
+	else
+		alias fileName R5;
+		fileName = [[PTBR + 2*((userSP-4)/512)]*512 + ((userSP-4)%512)];
+		alias openFileTableEntry R6;
+		//open file call
+		multipush(R0,R1,R2,R3,R4,R5);
+		R1 = 3;
+		R2 = fileName;
+		call MOD_3;
+		openFileTableEntry = R0;
+		multipop(R0,R1,R2,R3,R4,R5);
+		
+		if(openFileTableEntry < 0 ) then
+			[returnAddress] = openFileTableEntry;
+		else
+			[resourceTable + i*2 + 0] = FILE;
+			[resourceTable + i*2 + 1] = openFileTableEntry;
+			[returnAddress] = i;
+		endif;
+	endif;
+endif;
+
+
+
+//close sysCall
+if(sysCallNum == 3) then
+	alias fileDescriptor R3;
+	fileDescriptor = [[PTBR + 2*((userSP-4)/512)]*512 + ((userSP-4)%512)];
+	
+	if(fileDescriptor < 0 || fileDescriptor > 7) then 
+		[returnAddress] = -1;
+	else
+		alias resourceTableEntry R4;
+		resourceTableEntry = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 11]*512 + RESOURCE_TABLE_OFFSET + fileDescriptor*2;
+		if([resourceTableEntry] != FILE) then
+			[returnAddress] = -1;
+		else
+			alias openFileTableEntry R5;
+			openFileTableEntry = [resourceTableEntry + 1];
+			
+			//close file 
+			multipush(R0,R1,R2,R3,R4,R5);
+			R1 = 4;
+			R2 = openFileTableEntry;
+			call MOD_3;
+			multipop(R0,R1,R2,R3,R4,R5);
+			
+			[resourceTableEntry] = -1;
+			[returnAddress] = 0;
+		endif;
+	endif;
+endif;
+
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 13];
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 9] = 0;
+
+ireturn;
+		
