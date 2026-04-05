@@ -1,0 +1,227 @@
+alias functionNum R1;
+
+//buffer write
+if(functionNum == 1) then
+	alias blockNum R2;
+	alias offset R3;
+	alias wordToWrite R4;
+	alias bufferIndex R5;
+
+	bufferIndex = blockNum % MAX_BUFFER;
+	
+	//acquire buffer
+	multipush(R1,R2,R3,R4,R5);
+	R1 = 1;
+	R2 = bufferIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	multipop(R1,R2,R3,R4,R5);
+	
+	alias bufferTableEntry R6;
+	bufferTableEntry = BUFFER_TABLE + bufferIndex*4;
+	
+	//someother block in buffer?
+	if([bufferTableEntry + 0] != blockNum) then
+		//buffer dirty?
+		if([bufferTableEntry + 1] == 1) then
+			//disk store
+			multipush(R1,R2,R3,R4,R5,R6);
+			R1 = 1;
+			R2 = [SYSTEM_STATUS_TABLE + 1];
+			R3 = 71 + bufferIndex;
+			R4 = [bufferTableEntry + 0];
+			call MOD_4;
+			multipop(R1,R2,R3,R4,R5,R6);
+
+			[bufferTableEntry + 1] = 0;
+		endif;
+		
+		//disk load
+		multipush(R1,R2,R3,R4,R5,R6);
+		R1 = 2;
+		R4 = blockNum;
+		R3 = 71 + bufferIndex;
+		R2 = [SYSTEM_STATUS_TABLE + 1];
+		call MOD_4;
+		multipop(R1,R2,R3,R4,R5,R6);
+		[bufferTableEntry + 0] = blockNum;
+	endif;
+	[(71 + bufferIndex)*512 + offset] = wordToWrite;
+
+	[bufferTableEntry + 1] = 1;
+		
+	//release buffer
+	multipush(R1,R2,R3,R4,R5,R6);
+	R1 = 2;
+	R2 = bufferIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	multipop(R1,R2,R3,R4,R5,R6);
+	
+	return;
+endif;
+
+
+
+//buffer read
+if(functionNum == 2) then
+	alias blockNum R2;
+	alias offset R3;
+	alias memAddress R4;
+	alias bufferIndex R5;
+	bufferIndex = blockNum % MAX_BUFFER;
+	
+	//acquire buffer
+	multipush(R0,R1,R2,R3,R4,R5);
+	R1 = 1;
+	R2 = bufferIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	multipop(R0,R1,R2,R3,R4,R5);
+
+	alias bufferTableEntry R6;
+	bufferTableEntry = BUFFER_TABLE + bufferIndex*4;
+		
+	//buffer contain diff block?
+	if([bufferTableEntry + 0] != blockNum) then
+		//buffer dirty?
+		if([bufferTableEntry + 1] == 1) then
+			//disk store
+			multipush(R1,R2,R3,R4,R5,R6);
+			R1 = 1;	
+			R2 = [SYSTEM_STATUS_TABLE + 1];
+			R3 = 71 + bufferIndex;
+			R4 = [bufferTableEntry + 0];
+			call MOD_4;
+			multipop(R1,R2,R3,R4,R5,R6);
+			[bufferTableEntry + 1] = 0;
+		endif;
+		//disk load into buffer
+		multipush(R1,R2,R3,R4,R5,R6);
+		R1 = 2;
+		R4 = blockNum;
+		R2 = [SYSTEM_STATUS_TABLE + 1];
+		R3 = 71 + bufferIndex;
+		call MOD_4;
+		multipop(R1,R2,R3,R4,R5,R6);
+		
+		[bufferTableEntry + 0] = blockNum;
+	endif;
+	
+	[memAddress] = [(71 + bufferIndex)*512 + offset];
+	//release buffer
+	multipush(R1,R2,R3,R4,R5,R6);
+	R1 = 2;
+	R2 = bufferIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	multipop(R1,R2,R3,R4,R5,R6);
+	
+endif;
+
+//open file
+if(functionNum == 3) then
+	alias fileName R2;
+	alias inodeEntry R3;
+	inodeEntry = 0;
+	
+	while(inodeEntry < MAX_FILE_NUM) do
+		if([INODE_TABLE + inodeEntry*16 + 1] == fileName) then
+			break;
+		endif;
+		inodeEntry = inodeEntry + 1;
+	endwhile;
+	
+	if(inodeEntry == MAX_FILE_NUM) then
+		R0 = -1;
+	else	
+		alias returnValue R4;
+		//acquire inode
+		multipush(R0,R1,R2,R3);
+		R1 = 4;
+		R2 = inodeEntry;
+		R3 = [SYSTEM_STATUS_TABLE + 1];
+		call MOD_0;
+		returnValue = R0;
+		multipop(R0,R1,R2,R3);
+
+		if(returnValue == -1) then
+			R0 = -1;
+		else
+			if([INODE_TABLE + inodeEntry*16 + 0] == EXEC) then
+				//release inode
+				multipush(R0,R1,R2,R3,R4);
+				R1 = 5;
+				R2 = inodeEntry;
+				R3 = [SYSTEM_STATUS_TABLE + 1];
+				call MOD_0;
+				multipop(R0,R1,R2,R3,R4);
+				
+				R0 = -1;
+			else
+				alias openFileTableEntry R5;
+				openFileTableEntry = 0;
+				while(openFileTableEntry < MAX_OPENFILE_NUM) do
+					if([OPEN_FILE_TABLE + openFileTableEntry*4 + 0] == -1) then
+						break;
+					endif;
+					openFileTableEntry = openFileTableEntry + 1;
+				endwhile;
+				
+				if(openFileTableEntry == MAX_OPENFILE_NUM) then
+					R0 = -2;
+				else
+					if(fileName == "root") then
+						[OPEN_FILE_TABLE + openFileTableEntry*4 + 0] = INODE_ROOT;
+					else
+						if([FILE_STATUS_TABLE + inodeEntry*4 + 1] == -1) then
+							[FILE_STATUS_TABLE + inodeEntry*4 + 1] = 1;
+						else
+							[FILE_STATUS_TABLE + inodeEntry*4 + 1] = [FILE_STATUS_TABLE + inodeEntry*4 + 1] + 1;
+						endif;
+						[OPEN_FILE_TABLE + openFileTableEntry*4 + 0] = inodeEntry;
+					endif;
+					[OPEN_FILE_TABLE + openFileTableEntry*4 + 1] = 1;
+					[OPEN_FILE_TABLE + openFileTableEntry*4 + 2] = 0;
+					
+					//release inode
+					multipush(R0,R1,R2,R3,R4,R5);
+                               		R1 = 5;
+                                	R2 = inodeEntry;
+                                	R3 = [SYSTEM_STATUS_TABLE + 1];
+                                	call MOD_0;
+                                	multipop(R0,R1,R2,R3,R4,R5);
+					
+					
+					R0 = openFileTableEntry;
+				endif;
+			endif;
+		endif;
+	endif;
+endif;
+	
+//close file
+if(functionNum == 4) then
+	alias openFileEntry R2;
+	alias inodeIndex R3;
+	inodeIndex = [OPEN_FILE_TABLE + openFileEntry*4 + 0];
+	[OPEN_FILE_TABLE + openFileEntry*4 + 1] = [OPEN_FILE_TABLE + openFileEntry*4 + 1] - 1;
+	
+	if([OPEN_FILE_TABLE + openFileEntry*4 + 1] == 0) then
+		alias i R4;
+		i = 0;
+		while(i < 4) do
+			[OPEN_FILE_TABLE + openFileEntry*4 + i] = -1;
+			i = i + 1;
+		endwhile;
+		
+		if(inodeIndex != INODE_ROOT) then
+			[FILE_STATUS_TABLE + inodeIndex*4 + 1] = [FILE_STATUS_TABLE + inodeIndex*4 + 1] -1;
+			if([FILE_STATUS_TABLE + inodeIndex*4 + 1] == 0) then
+				[FILE_STATUS_TABLE + inodeIndex*4 + 1] = -1;
+			endif;
+		endif;
+	endif;
+endif;
+
+return;

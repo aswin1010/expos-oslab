@@ -1,0 +1,163 @@
+//SETTING THE MODE FLAG TO SYSTEM CALL NUM
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 9] = 5;
+
+
+alias userSP R0;
+userSP = SP;
+
+//SWITCHING STACKS USER->KERNAL
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 13] = SP;
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 11]*512 -1;
+
+alias returnAddress R1;
+returnAddress = [PTBR + 2*((userSP-1)/512)]*512 + ((userSP-1)%512);
+
+alias fileDescriptor R2;
+fileDescriptor=[[PTBR + 2*((userSP-4)/512)]*512 + ((userSP-4)%512)];
+
+alias word R3;
+word = [[PTBR + 2*((userSP-3)/512)]*512 + ((userSP-3)%512)];
+
+alias processTable R4;
+processTable = PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1]; 
+
+if (fileDescriptor != -2) then
+	//file write
+	if(fileDescriptor < 0 || fileDescriptor > 7) then
+		[returnAddress] = -1;
+		goto exit;
+	endif;
+	
+	alias resourceTable R5;
+	alias openFileTableEntry R6;
+	
+	resourceTable = [processTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	if([resourceTable + 2*fileDescriptor] != FILE) then
+		[returnAddress] = -1;
+		goto exit;
+	endif;
+		
+	openFileTableEntry = [resourceTable + 2*fileDescriptor + 1];
+	alias inodeIndex R7;
+	inodeIndex = [OPEN_FILE_TABLE + openFileTableEntry*4 + 0];
+
+	if(([processTable + 3] != 1) && ([processTable + 3] != [INODE_TABLE + inodeIndex*16 + 3]) && ([INODE_TABLE + inodeIndex*16 + 4] == EXCLUSIVE) ) then
+		[returnAddress] = -3;
+		goto exit;
+	endif;
+
+	//acquire inode
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+	R1 = 4;
+	R2 = inodeIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	R9 = R0;
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+
+	if(R9 == -1) then
+		[returnAddress] = -1;
+		goto exit;
+	endif;
+
+	alias lSeek R8;
+	lSeek = [OPEN_FILE_TABLE + openFileTableEntry*4 + 2];
+	
+	if(lSeek == MAX_FILE_SIZE) then
+		//release inode
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		R1 = 5;
+		R2 = inodeIndex;
+		R3 = [SYSTEM_STATUS_TABLE + 1];
+		call MOD_0;
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		[returnAddress] = -2;
+		goto exit;
+	endif;
+	
+	if(lSeek % 512 == 0 && lSeek == [INODE_TABLE + inodeIndex*16 + 2]) then
+		//get disk block
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		R1 = 3;
+		call MOD_2;
+		R9 = R0;
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		
+		if(R9 == -1) then
+			//release inode
+			multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+			R1 = 5;
+			R2 = inodeIndex;
+			R3 = [SYSTEM_STATUS_TABLE + 1];	
+			call MOD_0;
+			multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		
+			[returnAddress] = -2;
+			goto exit;
+		endif;
+		
+		[INODE_TABLE + inodeIndex*16 + 8 + (lSeek/512)] = R9;
+	endif;
+
+	alias blockNum R10;
+	alias offset R11;
+	blockNum = [INODE_TABLE + inodeIndex*16 + 8 + (lSeek/512)];
+	offset = lSeek%512;
+	
+	//buffer write
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+	R1 = 1;
+	R2 = blockNum;
+	R4 = word;
+	R3 = offset;
+	call MOD_3;
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+		
+	//if size was increased
+	if(lSeek == [INODE_TABLE + inodeIndex*16 + 2]) then
+		[INODE_TABLE + inodeIndex*16 + 2] = [INODE_TABLE + inodeIndex*16 + 2] + 1;
+	endif;
+	
+
+	[OPEN_FILE_TABLE + openFileTableEntry*4 + 2] = [OPEN_FILE_TABLE + openFileTableEntry*4 + 2] + 1;
+
+	//release inode
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R10,R11);
+	R1 = 5;	
+	R2 = inodeIndex;	
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R10,R11);
+
+	[returnAddress] = 0;
+	goto exit;
+		
+else
+	//terminal write
+
+	multipush(R0,R1,R2,R3,R4,R5);
+
+	alias arg1 R1;
+	alias arg2 R2;
+	alias arg3 R3;	
+	
+	arg1 = 3;
+	arg2 = [SYSTEM_STATUS_TABLE + 1];
+	arg3 = word; 
+
+	call MOD_4;
+
+	multipop(R0,R1,R2,R3,R4,R5);
+
+	[returnAddress] = 0;
+
+endif;
+
+exit:
+	//RESTORING USER STACK
+	SP = userSP;
+
+	//SETTING BACK THE MOD FLAG
+	[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+ireturn;
