@@ -58,10 +58,9 @@ if(functionNum == 7) then
 			endif;
 			i = i + 1;
 		endwhile;
+	endif;	
+	[SEMAPHORE_TABLE + 4*semID + 1] = [SEMAPHORE_TABLE + 4*semID + 1] - 1;
 	
-		[SEMAPHORE_TABLE + 4*semID + 1] = [SEMAPHORE_TABLE + 4*semID + 1] - 1;
-	endif;
-	return;
 endif;	
 
 
